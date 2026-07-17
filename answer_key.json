@@ -1,0 +1,14 @@
+[
+  {"tip": "drift", "kavram": "AKTIF_MUSTERI",
+   "not": "Zaman penceresi 90/30 gün + COUNT vs COUNT(DISTINCT)"},
+  {"tip": "drift", "kavram": "TAKIP_ORANI",
+   "not": "Payda: kapalı hesaplar bir raporda dışlanıyor, diğerinde değil"},
+  {"tip": "drift", "kavram": "DIJITAL_ORAN",
+   "not": "Kapsam: MOBIL+INTERNET vs yalnız MOBIL"},
+  {"tip": "drift", "kavram": "ISTANBUL_HACIM",
+   "not": "Lokasyon: şube ili vs müşteri ikamet ili"},
+  {"tip": "drift", "kavram": "TOPLAM_MUSTERI",
+   "not": "COUNT(*) hesap çokluğunda müşteriyi tekrar sayar"},
+  {"tip": "kopya", "kavram": "v_gunluk_islem / v_gunluk_islem_eski",
+   "not": "Birebir kopya view çifti"}
+]
