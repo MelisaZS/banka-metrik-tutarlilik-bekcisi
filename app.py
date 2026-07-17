@@ -15,7 +15,7 @@ import streamlit as st
 from detector.core import dogrulugu_olc, korpusu_tara, tara
 
 KOK = Path(__file__).parent
-SURUM = "v1.1"
+SURUM = "v1.3"
 
 st.set_page_config(page_title="Banka Metrik Tutarlılık Bekçisi",
                    page_icon="🏦", layout="wide",
@@ -31,6 +31,16 @@ T = {
    "hero_p": ("Rapor tanımlarındaki metrik tutarsızlıklarını toplantıdan önce "
               "yakalar — hangi tanımın doğru olduğuna iş birimleri karar verir."),
    "hero_notu": "Yalnızca SQL tanımlarını okur · Müşteri verisine erişmez",
+   "yukle_baslik": "Kendi raporlarını tara",
+   "yukle_aciklama": ("Rapor SQL dosyalarını (.sql / .txt) buraya bırak — "
+                      "sistem **yalnızca metni analiz eder**, hiçbir sorguyu "
+                      "çalıştırmaz ve dosyaları saklamaz. En az 2 dosya "
+                      "yükle ki tanımlar karşılaştırılabilsin."),
+   "yukle_etiket": "SQL dosyaları",
+   "yukle_not": ("Not: Canlı sonuç farkı (%) yalnızca demo korpusunda "
+                 "hesaplanır; yüklenen dosyalarda analiz tamamen statiktir."),
+   "yukle_mod": ("Yüklenen {n} dosya tarandı. Demo korpusuna dönmek için "
+                 "yukarıdaki dosyaları kaldır."),
    "kpi": ["Taranan rapor", "Çıkarılan metrik", "Açık bulgu", "En yüksek önem"],
    "filtreler": "Filtreler", "tip": "Bulgu tipi",
    "tip_drift": "Tanım kayması", "tip_kopya": "Gizli kopya",
@@ -101,6 +111,16 @@ gömme (embedding) tabanlı eşleştirme · bulguların e-posta özeti.
               "before the meeting — business units decide which definition "
               "is official."),
    "hero_notu": "Reads SQL definitions only · Never touches customer data",
+   "yukle_baslik": "Scan your own reports",
+   "yukle_aciklama": ("Drop your report SQL files (.sql / .txt) here — the "
+                      "system **analyzes text only**, never executes any "
+                      "query and never stores your files. Upload at least 2 "
+                      "files so definitions can be compared."),
+   "yukle_etiket": "SQL files",
+   "yukle_not": ("Note: the live result gap (%) is computed only for the "
+                 "demo corpus; analysis of uploaded files is fully static."),
+   "yukle_mod": ("Scanned {n} uploaded files. Remove the files above to "
+                 "return to the demo corpus."),
    "kpi": ["Reports scanned", "Metrics extracted", "Open findings",
            "Highest severity"],
    "filtreler": "Filters", "tip": "Finding type",
@@ -296,19 +316,35 @@ BANKACI_SVG = """
 
 # ---------------------------------------------------------------- veri
 @st.cache_data(show_spinner=False)
-def taramayi_calistir():
-    db = KOK / "bank.db"
-    con = sqlite3.connect(db) if db.exists() else None
-    bulgular = tara(KOK / "views", con=con)
-    metrikler = korpusu_tara(KOK / "views")
+def taramayi_calistir(dosyalar=None):
+    """dosyalar=None: demo korpusu (canlı sayılarla).
+    dosyalar=((ad, bytes), ...): kullanıcının yüklediği SQL'ler —
+    yalnızca metin analizi, hiçbir sorgu ÇALIŞTIRILMAZ."""
+    if dosyalar is None:
+        dizin = KOK / "views"
+        db = KOK / "bank.db"
+        con = sqlite3.connect(db) if db.exists() else None
+    else:
+        import tempfile
+        gecici = Path(tempfile.mkdtemp(prefix="korpus_"))
+        for ad, icerik in dosyalar:
+            guvenli_ad = Path(ad).stem[:80] or "rapor"
+            (gecici / f"{guvenli_ad}.sql").write_bytes(icerik)
+        dizin, con = gecici, None
+    bulgular = tara(dizin, con=con)
+    metrikler = korpusu_tara(dizin)
     if con:
         con.close()
     return ([{"tip": b.tip, "kavram": b.kavram, "puan": b.puan,
               "deger_farki": b.deger_farki, "degerler": b.degerler,
               "raporlar": sorted({m.rapor for m in b.metrikler}),
-              "farklar": b.farklar}
+              "farklar": b.farklar,
+              "sqller": {r: (dizin / f"{r}.sql").read_text(encoding="utf-8",
+                                                           errors="replace")
+                         for r in sorted({m.rapor for m in b.metrikler})
+                         if (dizin / f"{r}.sql").exists()}}
              for b in bulgular],
-            len(list((KOK / "views").glob("*.sql"))), len(metrikler),
+            len(list(dizin.glob("*.sql"))), len(metrikler),
             datetime.now().strftime("%d.%m.%Y %H:%M"))
 
 
@@ -339,7 +375,6 @@ if not (KOK / "bank.db").exists():
     with st.spinner("Sentetik veri üretiliyor..."):
         generate_data.main()
 
-bulgular, n_rapor, n_metrik, son_tarama = taramayi_calistir()
 if "durumlar" not in st.session_state:
     st.session_state.durumlar = {}   # kavram -> 0/1/2 (Açık/İncelemede/Çözüldü)
 
@@ -378,6 +413,21 @@ st.markdown(f"""
   </div>
   <div class="hero-gorsel">{BANKACI_SVG}</div>
 </div>""", unsafe_allow_html=True)
+
+# ---------------------------------------------------------------- yükleme
+with st.expander(f"📤 {t['yukle_baslik']}", expanded=False):
+    st.markdown(t["yukle_aciklama"])
+    yuklenen = st.file_uploader(t["yukle_etiket"], type=["sql", "txt"],
+                                accept_multiple_files=True,
+                                label_visibility="collapsed")
+    st.caption(t["yukle_not"])
+
+if yuklenen:
+    dosyalar = tuple(sorted((f.name, f.getvalue()) for f in yuklenen))
+    bulgular, n_rapor, n_metrik, son_tarama = taramayi_calistir(dosyalar)
+    st.success(t["yukle_mod"].format(n=n_rapor))
+else:
+    bulgular, n_rapor, n_metrik, son_tarama = taramayi_calistir()
 
 acik_sayisi = sum(1 for b in bulgular
                   if st.session_state.durumlar.get(b["kavram"], 0) != 2)
@@ -478,7 +528,9 @@ with sekme_bulgu:
                 for k, rapor in zip(kolonlar * 3, b["raporlar"][:3]):
                     with k:
                         st.caption(rapor)
-                        st.code(rapor_sql(rapor), language="sql")
+                        st.code(b.get("sqller", {}).get(rapor,
+                                                        rapor_sql(rapor)),
+                                language="sql")
                 if len(b["raporlar"]) > 3:
                     st.caption(t["daha"].format(n=len(b["raporlar"]) - 3))
 
